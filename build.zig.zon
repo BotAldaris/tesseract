@@ -1,6 +1,6 @@
 .{
     .name = .tesseract,
-    .version = "5.5.2",
+    .version = "5.5.3",
     .fingerprint = 0x4332210df79cc603,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
@@ -13,8 +13,8 @@
             .hash = "libarchive-3.8.1-cV3jExhdAAB04Dh42cE7LjIqMq0RUzPOoF9EV66wd2rS",
         },
         .tesseract = .{
-            .url = "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.2.tar.gz",
-            .hash = "N-V-__8AAD54fABx_lxeEyaEUZi2iozZ5tN7aotr7wH4elO_",
+            .url = "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.3.tar.gz",
+            .hash = "N-V-__8AAIrofABoWjz-kG5pAPHThEP9iBDvD9Xi1iQWzxu8",
         },
         .tiff = .{
             .url = "git+https://github.com/BotAldaris/tiff.git#93f9ce71d9d9a245cae6427775e086ce9f2e00b0",
