@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) !void {
         .linkage = .static,
         .root_module = mod,
     });
-    
+
     var cpp_files: std.ArrayList([]const u8) = .empty;
     try cpp_files.appendSlice(gpa, tesseract_src_api);
     try cpp_files.appendSlice(gpa, tesseract_src_ccmain);
@@ -38,6 +38,24 @@ pub fn build(b: *std.Build) !void {
     try cpp_files.appendSlice(gpa, tesseract_src_cutil);
 
     const disabled_legacy_engine = b.option(bool, "disabled_legacy_engine", "Disable the legacy OCR engine") orelse false;
+    const graphics_disabled = b.option(bool, "graphics_disabled", "Disable disable graphics (ScrollView)") orelse false;
+    const enable_lto = b.option(bool, "enable_lto", "Enable link-time optimization") orelse false;
+    const fast_float = b.option(bool, "fast_float", "Enable float for LSTM") orelse true;
+    const build_cli = b.option(bool, "build_cli", "Will build the tesseract cli") orelse false;
+    const install_configs = b.option(bool, "tesseract_config", "Install tesseract configs") orelse false;
+
+    if (graphics_disabled) {
+        mod.addCMacro("GRAPHICS_DISABLED", "1");
+    }
+
+    if (fast_float) {
+        mod.addCMacro("FAST_FLAOT", "1");
+        try cpp_flags.append(gpa, "-ffast-math");
+    }
+
+    if (enable_lto) {
+        try cpp_flags.append(gpa, "-flto");
+    }
 
     if (disabled_legacy_engine) {
         for (tesseract_src_legacy) |value| {
@@ -51,39 +69,33 @@ pub fn build(b: *std.Build) !void {
             }
         }
     }
-
-    var have_avx = false;
-    var have_avx2 = false;
-    var have_avx512f = false;
-    var have_fma = false;
-    var have_sse4_1 = false;
     var have_neon = true;
 
     if (target.result.cpu.arch.isX86()) {
         have_neon = false;
         if (target.result.cpu.features.isEnabled(@intFromEnum(std.Target.x86.Feature.avx))) {
             mod.addCMacro("HAVE_AVX", "1");
-            have_avx = true;
             try cpp_files.appendSlice(gpa, tesseract_src_arch_avx);
+            try cpp_flags.append(gpa, "-mavx");
         }
         if (target.result.cpu.features.isEnabled(@intFromEnum(std.Target.x86.Feature.avx2))) {
             mod.addCMacro("HAVE_AVX2", "1");
-            have_avx2 = true;
             try cpp_files.appendSlice(gpa, tesseract_src_arch_avx2);
+            try cpp_flags.append(gpa, "-mavx2");
         }
         if (target.result.cpu.features.isEnabled(@intFromEnum(std.Target.x86.Feature.avx512f))) {
             mod.addCMacro("HAVE_AVX512F", "1");
-            have_avx512f = true;
+            try cpp_flags.append(gpa, "-mavx512f");
             try cpp_files.appendSlice(gpa, tesseract_src_arch_avx512f);
         }
         if (target.result.cpu.features.isEnabled(@intFromEnum(std.Target.x86.Feature.fma))) {
             mod.addCMacro("HAVE_FMA", "1");
-            have_fma = true;
+            try cpp_flags.append(gpa, "-mfma");
             try cpp_files.appendSlice(gpa, tesseract_src_arch_fma);
         }
         if (target.result.cpu.features.isEnabled(@intFromEnum(std.Target.x86.Feature.sse4_1))) {
             mod.addCMacro("HAVE_SSE4_1", "1");
-            have_sse4_1 = true;
+            try cpp_flags.append(gpa, "-msse4.1");
             try cpp_files.appendSlice(gpa, tesseract_src_arch_sse41);
         }
     } else if (target.result.cpu.arch.isArm()) {
@@ -95,6 +107,7 @@ pub fn build(b: *std.Build) !void {
     }
     if (have_neon) {
         mod.addCMacro("HAVE_NEON", "1");
+        try cpp_flags.append(gpa, "-mfpu=neon");
         try cpp_files.appendSlice(gpa, tesseract_src_arch_neon);
     }
 
@@ -132,22 +145,27 @@ pub fn build(b: *std.Build) !void {
     });
     mod.addConfigHeader(config_header);
 
-    mod.addIncludePath(upstream.path("src"));
-    mod.addIncludePath(upstream.path("src/api/"));
-    mod.addIncludePath(upstream.path("src/arch/"));
-    mod.addIncludePath(upstream.path("src/ccmain/"));
-    mod.addIncludePath(upstream.path("src/ccstruct/"));
-    mod.addIncludePath(upstream.path("src/ccutil/"));
-    mod.addIncludePath(upstream.path("src/classify/"));
-    mod.addIncludePath(upstream.path("src/cutil/"));
-    mod.addIncludePath(upstream.path("src/dict/"));
-    mod.addIncludePath(upstream.path("src/lstm/"));
-    mod.addIncludePath(upstream.path("src/textord/"));
-    mod.addIncludePath(upstream.path("src/training/"));
-    mod.addIncludePath(upstream.path("src/viewer/"));
-    mod.addIncludePath(upstream.path("src/wordrec/"));
+    const include_paths: []const []const u8 = &.{
+        "src",
+        "src/api/",
+        "src/arch/",
+        "src/ccmain/",
+        "src/ccstruct/",
+        "src/ccutil/",
+        "src/classify/",
+        "src/cutil/",
+        "src/dict/",
+        "src/lstm/",
+        "src/textord/",
+        "src/training/",
+        "src/viewer/",
+        "src/wordrec/",
+        "include",
+    };
 
-    mod.addIncludePath(upstream.path("include"));
+    for (include_paths) |path| {
+        mod.addIncludePath(upstream.path(path));
+    }
 
     mod.addCSourceFiles(.{
         .files = cpp_files.items,
@@ -160,6 +178,53 @@ pub fn build(b: *std.Build) !void {
         "tesseract/version.h",
     );
     b.installArtifact(lib);
+
+    if (install_configs) {
+        b.installDirectory(.{
+            .source_dir = upstream.path("tessdata/configs"),
+            .install_dir = .{ .custom = "share/tessdata/configs" },
+            .install_subdir = "",
+        });
+        b.installDirectory(.{
+            .source_dir = upstream.path("tessdata/tessconfigs"),
+            .install_dir = .{ .custom = "share/tessdata/tessconfigs" },
+            .install_subdir = "",
+        });
+    }
+
+    if (build_cli) {
+        const exe_mod = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .link_libcpp = true,
+        });
+
+        exe_mod.addCSourceFile(.{ .file = upstream.path("src/tesseract.cpp"), .flags = cpp_flags.items });
+        exe_mod.addCMacro("HAVE_LIBARCHIVE", "1");
+        exe_mod.addCMacro("HAVE_TIFFIO_H", "1");
+        if (have_neon) {
+            exe_mod.addCMacro("HAVE_NEON", "1");
+        }
+
+        exe_mod.linkLibrary(lib);
+        exe_mod.linkLibrary(leptonica_dep.artifact("lept"));
+        exe_mod.linkLibrary(tiff_dep.artifact("tiff"));
+        exe_mod.linkLibrary(bzip_dependency.artifact("archive"));
+
+        for (include_paths) |path| {
+            exe_mod.addIncludePath(upstream.path(path));
+        }
+        const exe = b.addExecutable(.{
+            .name = "tesseract",
+            .root_module = exe_mod,
+        });
+        if (enable_lto) {
+            exe.lto = .full;
+        }
+
+        b.installArtifact(exe);
+    }
 }
 
 const tesseract_src_api: []const []const u8 = &.{
